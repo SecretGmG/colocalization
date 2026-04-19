@@ -1,8 +1,7 @@
-from typing import Dict, Literal
-import itertools
+from typing import Literal
 import numpy as np
 import skimage as ski
-import pandas as pd
+import matplotlib.pyplot as plt
 
 def get_labels(mask : np.ndarray) -> np.ndarray:
     """
@@ -11,20 +10,15 @@ def get_labels(mask : np.ndarray) -> np.ndarray:
     return np.asarray(ski.measure.label(mask))
 
 def plot_labels(labels : np.ndarray) -> None:
-    # Visualize labeled image with label numbers at centroids
-    import matplotlib.pyplot as plt
     
-    # Assuming 'labels' is your labeled image (e.g., from skimage.measure.label)
     fig, ax = plt.subplots(figsize=(8, 8))
     cmap = plt.cm.nipy_spectral # type: ignore
     im = ax.imshow(labels, cmap=cmap)
     
-    # Compute region properties
     regions = ski.measure.regionprops(labels)
     for region in regions:
-        # Place label number at centroid
         y, x = region.centroid
-        ax.text(x, y, str(region.label-1), color='white', fontsize=10, ha='center', va='center',
+        ax.text(x, y, str(region.label), color='white', fontsize=10, ha='center', va='center',
                 bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.2'))
     
     ax.set_title('Labeled regions with label numbers')
@@ -32,7 +26,7 @@ def plot_labels(labels : np.ndarray) -> None:
     plt.show()
 
 
-def extract(stack : np.ndarray, mask : np.ndarray, apply_filter : bool = False) -> np.ndarray:
+def extract(stack : np.ndarray, mask : np.ndarray, apply_filter : bool = False) -> tuple[np.ndarray, np.ndarray]:
     """
     Extracts the stack corresponding to the mask.
     """
@@ -43,43 +37,60 @@ def extract(stack : np.ndarray, mask : np.ndarray, apply_filter : bool = False) 
     if apply_filter:
         stack=stack*mask[..., np.newaxis]
     
-    return stack[x0:x1, y0:y1, :]
+    return stack[x0:x1, y0:y1, :], mask[x0:x1, y0:y1]
 
 
-def extract_stacks(stack : np.ndarray, labels : np.ndarray, apply_filter : bool = False) -> list[np.ndarray]:
+def extract_stacks(stack : np.ndarray, labels : np.ndarray, apply_filter : bool = False) -> tuple[list[int], list[np.ndarray], list[np.ndarray]]:
     """
     Extracts the stacks corresponding to the fully connected components in the mask.
     """
     stacks = []
-    for i in range(1, labels.max() + 1):
+    masks = []
+    indices = []
+    for i in np.unique(labels):
+        if i == 0:
+            continue
         mask = labels == i
-        extracted_stack = extract(stack, mask, apply_filter)
+        extracted_stack, extracted_mask = extract(stack, mask, apply_filter)
+        indices.append(i)
         stacks.append(extracted_stack)
-    return stacks
+        masks.append(extracted_mask)
+        
+    sorted_indices = np.argsort([mask.sum() for mask in masks])[::-1]
+    stacks = [stacks[i] for i in sorted_indices]
+    masks = [masks[i] for i in sorted_indices]
+    indices = [indices[i] for i in sorted_indices]
+    
+    return indices, stacks, masks
 
 def normalize_stack(stack : np.ndarray, mode = Literal["minmax", "zscore"]) -> np.ndarray:
     """
-    Normalizes a stack to [0,1].
+    applies normalization to each channel in a stack
     """
     if mode == "minmax":
-        return (stack - stack.min()) / (stack.max() - stack.min())
+        return (stack - stack.min(axis=(0, 1))) / (stack.max(axis=(0, 1)) - stack.min(axis=(0, 1)) + 1e-8)
     elif mode == "zscore":
-        return (stack - stack.mean()) / (stack.std() + 1e-8)
+        return (stack - stack.mean(axis=(0, 1))) / (stack.std(axis=(0, 1)) + 1e-8)
     else:
         raise ValueError(f"Unknown normalization mode: {mode}")
     
 
-def gather_coefficients(stacks: list[np.ndarray]) -> Dict[str, Dict[tuple[int, int], np.ndarray]]:
+def manders_overlap_coeff(stacks: list[np.ndarray], masks: list[np.ndarray], ch1: int, ch2: int) -> list[float]:
     """
     Gathers statistics from the stacks.
     """
-    combos = list(itertools.combinations(range(stacks[0].shape[-1]), 2))
-    moc = {(i, j): np.ndarray([]) for i, j in combos}
-    pearson = {(i, j): np.ndarray([]) for i, j in combos}
+    moc = []
+    for stack, mask in zip(stacks, masks):
+        moc.append(ski.measure.manders_overlap_coeff(stack[..., ch1], stack[..., ch2], mask))
 
-    for i, stack in enumerate(stacks):
-        for i, j in combos:
-            moc[(i, j)] = np.append(moc[(i, j)], ski.measure.manders_overlap_coeff(stack[..., i], stack[..., j]))
-            pearson[(i, j)] = np.append(pearson[(i, j)], ski.measure.pearson_corr_coeff(stack[..., i], stack[..., j]))
+    return moc
 
-    return {"MOC": moc, "Pearson": pearson}
+def pearson_corr_coeff(stacks: list[np.ndarray], masks: list[np.ndarray], ch1: int, ch2: int) -> list[float]:
+    """
+    Gathers statistics from the stacks.
+    """
+    pearson = []
+    for stack, mask in zip(stacks, masks):
+        pearson.append(ski.measure.pearson_corr_coeff(stack[..., ch1], stack[..., ch2], mask)[0])
+
+    return pearson
