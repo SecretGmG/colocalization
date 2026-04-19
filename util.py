@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Dict, Literal
 import itertools
 import numpy as np
 import skimage as ski
@@ -65,21 +65,21 @@ def normalize_stack(stack : np.ndarray, mode = Literal["minmax", "zscore"]) -> n
         return (stack - stack.min()) / (stack.max() - stack.min())
     elif mode == "zscore":
         return (stack - stack.mean()) / (stack.std() + 1e-8)
+    else:
+        raise ValueError(f"Unknown normalization mode: {mode}")
     
 
-def gather_statistics(stacks: list[np.ndarray]) -> pd.DataFrame:
+def gather_coefficients(stacks: list[np.ndarray]) -> Dict[str, Dict[tuple[int, int], np.ndarray]]:
     """
     Gathers statistics from the stacks.
     """
     combos = list(itertools.combinations(range(stacks[0].shape[-1]), 2))
-    rows = []
+    moc = {(i, j): np.ndarray([]) for i, j in combos}
+    pearson = {(i, j): np.ndarray([]) for i, j in combos}
 
     for i, stack in enumerate(stacks):
-        row = {}
-        for c1, c2 in combos:
-            row[f"MOC_{c1}-{c2}"] = ski.measure.manders_overlap_coeff(stack[..., c1], stack[..., c2])
-            row[f"Pearson_{c1}-{c2}"] = ski.measure.pearson_corr_coeff(stack[..., c1], stack[..., c2])
-        rows.append(row)
+        for i, j in combos:
+            moc[(i, j)] = np.append(moc[(i, j)], ski.measure.manders_overlap_coeff(stack[..., i], stack[..., j]))
+            pearson[(i, j)] = np.append(pearson[(i, j)], ski.measure.pearson_corr_coeff(stack[..., i], stack[..., j]))
 
-    df = pd.DataFrame(rows)
-    return df
+    return {"MOC": moc, "Pearson": pearson}
