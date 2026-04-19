@@ -40,30 +40,23 @@ def extract(stack : np.ndarray, mask : np.ndarray, apply_filter : bool = False) 
     return stack[x0:x1, y0:y1, :], mask[x0:x1, y0:y1]
 
 
-def extract_stacks(stack : np.ndarray, labels : np.ndarray, apply_filter : bool = False) -> tuple[list[int], list[np.ndarray], list[np.ndarray]]:
+def extract_stacks(stack : np.ndarray, labels : np.ndarray, apply_filter : bool = False) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """
     Extracts the stacks corresponding to the fully connected components in the mask.
     """
     stacks = []
     masks = []
-    indices = []
-    for i in np.unique(labels):
+    for i in range(1, labels.max() + 1):
         if i == 0:
             continue
         mask = labels == i
         extracted_stack, extracted_mask = extract(stack, mask, apply_filter)
-        indices.append(i)
         stacks.append(extracted_stack)
         masks.append(extracted_mask)
         
-    sorted_indices = np.argsort([mask.sum() for mask in masks])[::-1]
-    stacks = [stacks[i] for i in sorted_indices]
-    masks = [masks[i] for i in sorted_indices]
-    indices = [indices[i] for i in sorted_indices]
-    
-    return indices, stacks, masks
+    return stacks, masks
 
-def normalize_stack(stack : np.ndarray, mode = Literal["minmax", "zscore"]) -> np.ndarray:
+def normalize_stack(stack : np.ndarray, mode : Literal["minmax", "zscore"] = "minmax") -> np.ndarray:
     """
     applies normalization to each channel in a stack
     """
@@ -75,13 +68,128 @@ def normalize_stack(stack : np.ndarray, mode = Literal["minmax", "zscore"]) -> n
         raise ValueError(f"Unknown normalization mode: {mode}")
     
 
-def manders_overlap_coeff(stacks: list[np.ndarray], masks: list[np.ndarray], ch1: int, ch2: int) -> list[float]:
+import matplotlib.pyplot as plt
+import ipywidgets as widgets
+from IPython.display import display, clear_output
+
+
+def filter_stacks(extracted_stacks, extracted_masks, stack_channel=0, figsize=(8, 4)):
     """
-    Gathers statistics from the stacks.
+    Interactively review stack/mask pairs in a Jupyter notebook and return the
+    indices of the accepted stacks.
+
+    Parameters
+    ----------
+    extracted_stacks : sequence
+        Sequence of image stacks. Each stack is expected to support indexing like
+        stack[..., stack_channel].
+    extracted_masks : sequence
+        Sequence of masks corresponding to `extracted_stacks`.
+    stack_channel : int, default=0
+        Channel index to display from each stack.
+    figsize : tuple, default=(8, 4)
+        Figure size passed to matplotlib.
+
+    Returns
+    -------
+    accepted_stacks : list[int]
+        List that is updated interactively with the indices of accepted stacks.
+
+    Notes
+    -----
+    - Intended for Jupyter notebooks.
+    - The returned list is populated as the user clicks through the stacks.
+    - Once all stacks have been reviewed, the final accepted indices remain in
+      the returned list.
+    """
+    if len(extracted_stacks) != len(extracted_masks):
+        raise ValueError(
+            f"Length mismatch: {len(extracted_stacks)=} != {len(extracted_masks)=}"
+        )
+
+    accepted_stacks = []
+    current_idx = 0
+
+    out = widgets.Output()
+    status = widgets.HTML()
+
+    accept_btn = widgets.Button(description="Accept", button_style="success")
+    decline_btn = widgets.Button(description="Decline", button_style="danger")
+
+    def show_stack(i):
+        with out:
+            clear_output(wait=True)
+
+            fig, axes = plt.subplots(1, 2, figsize=figsize)
+            fig.suptitle(f"Stack {i}")
+
+            axes[0].imshow(extracted_stacks[i][..., stack_channel], cmap="gray")
+            axes[0].set_title("Stack")
+            axes[0].axis("off")
+
+            axes[1].imshow(extracted_masks[i], cmap="gray")
+            axes[1].set_title("Mask")
+            axes[1].axis("off")
+
+            plt.tight_layout()
+            plt.show()
+
+    def finish():
+        with out:
+            clear_output(wait=True)
+            print("Done.")
+            print("Accepted indices:", accepted_stacks)
+
+        accept_btn.disabled = True
+        decline_btn.disabled = True
+        status.value = "<b>Finished</b>"
+
+    def next_stack():
+        nonlocal current_idx
+
+        if current_idx < len(extracted_stacks):
+            show_stack(current_idx)
+            status.value = f"<b>{current_idx + 1} / {len(extracted_stacks)}</b>"
+        else:
+            finish()
+
+    def on_accept(_):
+        nonlocal current_idx
+        accepted_stacks.append(current_idx)
+        current_idx += 1
+        next_stack()
+
+    def on_decline(_):
+        nonlocal current_idx
+        current_idx += 1
+        next_stack()
+
+    accept_btn.on_click(on_accept)
+    decline_btn.on_click(on_decline)
+
+    display(
+        widgets.VBox(
+            [
+                status,
+                out,
+                widgets.HBox([accept_btn, decline_btn]),
+            ]
+        )
+    )
+
+    next_stack()
+    return accepted_stacks
+
+
+def manders_overlap_coeff(stacks: list[np.ndarray], masks: list[np.ndarray], ch1: int, ch2: int, threshold_ab: float, threshold_ba: float) -> list[float]:
+    """
+    returns the MOC and M1/M2 coefficients for each stack and mask. The thresholds are used to binarize the channels for the M1/M2 coefficients.
     """
     moc = []
     for stack, mask in zip(stacks, masks):
-        moc.append(ski.measure.manders_overlap_coeff(stack[..., ch1], stack[..., ch2], mask))
+        moc.append([ski.measure.manders_overlap_coeff(stack[..., ch1], stack[..., ch2], mask),
+        ski.measure.manders_coloc_coeff(stack[..., ch1], stack[..., ch2]>threshold_ab, mask),
+        ski.measure.manders_coloc_coeff(stack[..., ch2], stack[..., ch1]>threshold_ba, mask)])
 
     return moc
 
