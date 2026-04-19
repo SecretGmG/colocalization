@@ -74,39 +74,6 @@ from IPython.display import display, clear_output
 
 
 def filter_stacks(extracted_stacks, extracted_masks, stack_channel=0, figsize=(8, 4)):
-    """
-    Interactively review stack/mask pairs in a Jupyter notebook and return the
-    indices of the accepted stacks.
-
-    Parameters
-    ----------
-    extracted_stacks : sequence
-        Sequence of image stacks. Each stack is expected to support indexing like
-        stack[..., stack_channel].
-    extracted_masks : sequence
-        Sequence of masks corresponding to `extracted_stacks`.
-    stack_channel : int, default=0
-        Channel index to display from each stack.
-    figsize : tuple, default=(8, 4)
-        Figure size passed to matplotlib.
-
-    Returns
-    -------
-    accepted_stacks : list[int]
-        List that is updated interactively with the indices of accepted stacks.
-
-    Notes
-    -----
-    - Intended for Jupyter notebooks.
-    - The returned list is populated as the user clicks through the stacks.
-    - Once all stacks have been reviewed, the final accepted indices remain in
-      the returned list.
-    """
-    if len(extracted_stacks) != len(extracted_masks):
-        raise ValueError(
-            f"Length mismatch: {len(extracted_stacks)=} != {len(extracted_masks)=}"
-        )
-
     accepted_stacks = []
     current_idx = 0
 
@@ -171,8 +138,8 @@ def filter_stacks(extracted_stacks, extracted_masks, stack_channel=0, figsize=(8
         widgets.VBox(
             [
                 status,
-                out,
                 widgets.HBox([accept_btn, decline_btn]),
+                out,
             ]
         )
     )
@@ -181,7 +148,7 @@ def filter_stacks(extracted_stacks, extracted_masks, stack_channel=0, figsize=(8
     return accepted_stacks
 
 
-def manders_overlap_coeff(stacks: list[np.ndarray], masks: list[np.ndarray], ch1: int, ch2: int, threshold_ab: float, threshold_ba: float) -> list[float]:
+def manders_overlap_coeff(stacks: list[np.ndarray], masks: list[np.ndarray], ch1: int, ch2: int, threshold_ab: float, threshold_ba: float) -> np.ndarray:
     """
     returns the MOC and M1/M2 coefficients for each stack and mask. The thresholds are used to binarize the channels for the M1/M2 coefficients.
     """
@@ -191,9 +158,9 @@ def manders_overlap_coeff(stacks: list[np.ndarray], masks: list[np.ndarray], ch1
         ski.measure.manders_coloc_coeff(stack[..., ch1], stack[..., ch2]>threshold_ab, mask),
         ski.measure.manders_coloc_coeff(stack[..., ch2], stack[..., ch1]>threshold_ba, mask)])
 
-    return moc
+    return np.asarray(moc)
 
-def pearson_corr_coeff(stacks: list[np.ndarray], masks: list[np.ndarray], ch1: int, ch2: int) -> list[float]:
+def pearson_corr_coeff(stacks: list[np.ndarray], masks: list[np.ndarray], ch1: int, ch2: int) -> np.ndarray:
     """
     Gathers statistics from the stacks.
     """
@@ -201,4 +168,4 @@ def pearson_corr_coeff(stacks: list[np.ndarray], masks: list[np.ndarray], ch1: i
     for stack, mask in zip(stacks, masks):
         pearson.append(ski.measure.pearson_corr_coeff(stack[..., ch1], stack[..., ch2], mask)[0])
 
-    return pearson
+    return np.asarray(pearson)
