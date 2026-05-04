@@ -145,6 +145,7 @@ def filter_stacks(extracted_stacks, extracted_masks, stack_channel=0, figsize=(8
     )
 
     next_stack()
+    
     return accepted_stacks
 
 
